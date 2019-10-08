@@ -183,7 +183,7 @@ namespace RabbitMQ.Util
         /// method will throw EndOfStreamException.
         ///</para>
         ///</remarks>
-        public bool Dequeue(int millisecondsTimeout, out T result)
+         public bool Dequeue(int millisecondsTimeout, out T result)
         {
             if (millisecondsTimeout == Timeout.Infinite)
             {
@@ -192,24 +192,44 @@ namespace RabbitMQ.Util
             }
 
             DateTime startTime = DateTime.Now;
-            lock (m_queue)
-            {
-                while (m_queue.Count == 0)
-                {
-                    EnsureIsOpen();
-                    var elapsedTime = (int)((DateTime.Now - startTime).TotalMilliseconds);
-                    int remainingTime = millisecondsTimeout - elapsedTime;
-                    if (remainingTime <= 0)
-                    {
-                        result = default(T);
-                        return false;
-                    }
 
-                    Monitor.Wait(m_queue, remainingTime);
+            while (m_queue.Count == 0)
+            {
+                EnsureIsOpen();
+                var elapsedTime = (int)((DateTime.Now - startTime).TotalMilliseconds);
+                int remainingTime = millisecondsTimeout - elapsedTime;
+                if (remainingTime <= 0)
+                {
+                    result = default(T);
+                    return false;
                 }
 
-                result = m_queue.Dequeue();
-                return true;
+                var isReceiveMsg = SpinWait.SpinUntil(() =>
+                {
+                    return m_queue.Count > 0;
+                }, remainingTime);
+
+                if (isReceiveMsg == false)
+                {
+                    result = default(T);
+                    return false;
+                }
+                else
+                    break;               
+            }
+
+            lock (m_queue)
+            {
+                if (m_queue.Count > 0)
+                {
+                    result = m_queue.Dequeue();
+                    return true;
+                }
+                else
+                {
+                    result = default(T);
+                    return false;
+                }
             }
         }
 
